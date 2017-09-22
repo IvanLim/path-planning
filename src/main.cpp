@@ -280,14 +280,16 @@ int main() {
 					// We want to keep track of the distance to the nearest car
 					check_distance = std::min(check_distance, check_car_s - car_s);
 
-					// If we are too close to this car
+					// Save the speed of this car as we might want to follow it
+					follow_speed = std::min(follow_speed, std::min(check_speed * 2, SPEED_LIMIT));
+															
+					// If we are too close to this car, flag it
 					if ((check_car_s > car_s) && ((check_car_s - car_s) < 30)) {
 
 						too_close = true;
-						
-						// Save the speed of this car as we might want to follow it
-						follow_speed = std::min(follow_speed, check_speed);
+
 					}
+
 				} else {
 					// For cars in other lanes
 
@@ -361,11 +363,6 @@ int main() {
 						if (ref_vel > std::min(follow_speed, SPEED_LIMIT)) {
 							ref_vel -= 0.224;
 						}
-
-						// If we are too close, apply EMERGENCY BRAKES!
-						if (check_distance < 10) {
-							ref_vel = 0;
-						}
 					}
 				}
 			} else {
@@ -376,6 +373,10 @@ int main() {
 			}
 			
 
+			// Now that we have worked out the target lane and reference velocity
+			// We can start building a path that achieves that (using a spline library).
+
+			// Collection of points for our spline
 			vector<double> ptsx;
 			vector<double> ptsy;
 
@@ -409,6 +410,8 @@ int main() {
 				ptsy.push_back(ref_y);
 			}
 
+			// These are the key points that we want to fit our spline through
+			// We space them widely apart, and then use interpolation to work out the in-between points
 			vector<double> next_wp0 = getXY(car_s + 30, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
 			vector<double> next_wp1 = getXY(car_s + 60, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
 			vector<double> next_wp2 = getXY(car_s + 90, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
@@ -421,6 +424,7 @@ int main() {
 			ptsy.push_back(next_wp1[1]);
 			ptsy.push_back(next_wp2[1]);
 
+			// Normalize the points so that they are relative to our (ref_x and ref_y) starting reference
 			for (int i = 0; i < ptsx.size(); i++) {
 				double shift_x = ptsx[i] - ref_x;
 				double shift_y = ptsy[i] - ref_y;
@@ -429,14 +433,18 @@ int main() {
 				ptsy[i] = (shift_x * sin(0 - ref_yaw) + shift_y * cos(0 - ref_yaw));
 			}
 
+			// Variable to store our spline
 			tk::spline s;
 
 			// Add the points for the spline to fit through
 			s.set_points(ptsx, ptsy);
 			
+			// Vectors storing our final path
 			vector<double> next_x_vals;
 			vector<double> next_y_vals;
 
+
+			// Copies in the leftover points from the previous path
 			for (int i = 0; i < previous_path_x.size(); i++) {
 				next_x_vals.push_back(previous_path_x[i]);
 				next_y_vals.push_back(previous_path_y[i]);
@@ -448,6 +456,7 @@ int main() {
 
 			double x_add_on = 0;
 
+			// Fill up the remaining points until we have 50 points
 			for (int i = 1; i < 50 - previous_path_x.size(); i++) {
 
 				double N = (target_dist / (0.02 * ref_vel / 2.24)); // 2.24 converts ref_vel from miles/hour to meters/second
